@@ -1,14 +1,9 @@
-# Импортируем необходимые классы.
-import datetime
-import json
 import logging
 import os
-from random import shuffle
 
-from telegram.ext import Application, MessageHandler, filters
+import aiohttp
 from dotenv import load_dotenv
-from telegram import ReplyKeyboardMarkup
-from random import randrange
+from telegram.ext import Application, MessageHandler, filters
 
 load_dotenv()
 BOT_TOKEN = os.getenv('token', 'nosecret')
@@ -21,65 +16,59 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Добавим необходимый объект из модуля telegram.ext
-from telegram.ext import CommandHandler, ConversationHandler
+from telegram.ext import CommandHandler
 
 
-filename = input('Введите имя файла с вопросами ')
-with open(filename, 'r', encoding='utf-8') as file:
-    data = json.load(file)['test']
-print('Данные из файла получены')
+async def geocoder(update, context):
+    geocoder_uri = "http://geocode-maps.yandex.ru/1.x/"
+    try:
+        response = await get_response(geocoder_uri, params={
+            "apikey": "8013b162-6b42-4997-9691-77b7074026e0",
+            "format": "json",
+            "geocode": update.message.text
+        })
+        if response['response']['GeoObjectCollection']['metaDataProperty']['GeocoderResponseMetaData']['found'] == '0':
+            await update.message.reply_text(
+                f'По этому запросу ничего не найдено')
+            return
+    except Exception as e:
+        await update.message.reply_text(
+            f'Во время получения данных произошла ошибка {e}. Попробуй повторить запрос позже')
+        return
+
+    toponym = response["response"]["GeoObjectCollection"][
+        "featureMember"][0]["GeoObject"]
+    coordinates = toponym['Point']["pos"]
+
+    try:
+        response_map = f"http://static-maps.yandex.ru/1.x/?spn=0.01,0.01&size=650,450&pt={','.join(coordinates.split())},pm2lbm&l=map"
+    except Exception as e:
+        await update.message.reply_text(
+            f'Во время получения данных произошла ошибка {e}. Попробуй повторить запрос позже')
+        return
+    await context.bot.send_photo(update.message.chat_id, response_map,
+                                 caption="Вот что я нашёл. Что ещё вы хотите увидеть?")
+
+
+async def get_response(url, params):
+    logger.info(f"getting {url}")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as resp:
+            return await resp.json()
 
 
 async def start(update, context):
-    context.user_data['result'] = 0  # количество правильных ответов
-    context.user_data['questions'] = data.copy()
-    shuffle(context.user_data['questions'])
-    print(context.user_data['questions'])
     await update.message.reply_text(
-        f'Предлагаю пройти тест\n'
-        f'Для досрочного завершения отправьте /stop\n'
-        f'{context.user_data["questions"][0]["question"]}')
-    return 1
-
-
-
-async def stop(update, context):
-    response_text = 'Ладно. Может быть, начнём сначала?'
-    response_keyboard = [['/start']]
-    markup = ReplyKeyboardMarkup(response_keyboard)
-    await update.message.reply_text(response_text, reply_markup=markup)
-    return ConversationHandler.END
-
-
-
-async def main_handler(update, context):
-    text = update.message.text
-    current_question = context.user_data['questions'].pop(0)
-    if text == current_question['response']:
-        context.user_data['result'] += 1
-    if len(context.user_data['questions']) == 0:
-        response_text = (f'Вопросы закончились. Ваш результат {context.user_data['result']}/{len(data)}\n'
-                         f'Пройдём тест снова?')
-        response_keyboard = [['/start']]
-        markup = ReplyKeyboardMarkup(response_keyboard)
-        await update.message.reply_text(response_text, reply_markup=markup)
-        return ConversationHandler.END
-    else:
-        question = context.user_data['questions'][0]['question']
-        await update.message.reply_text(question)
-        return 1
+        "Привет! Я бот-геокодер.\n"
+        "Напешите город или какой-либо объект и я пришлю его расположение на карте!",
+    )
 
 
 def main():
-    conversation_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            1: [MessageHandler(filters.TEXT & ~filters.COMMAND, main_handler)]
-        },
-        fallbacks=[CommandHandler('stop', stop)]
-    )
     application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(conversation_handler)
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT, geocoder))
 
     # Запускаем приложение.
     application.run_polling()
