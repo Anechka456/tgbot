@@ -1,3 +1,4 @@
+import datetime
 import os
 
 import vk_api
@@ -20,14 +21,21 @@ def main():
             vk = vk_session.get_api()
             response = vk.users.get(user_id=event.obj.message['from_id'], fields='city')[0]
             print(response)
-            vk.messages.send(user_id=event.obj.message['from_id'],
-                             message=f"Привет, {response['first_name']}!",
-                             random_id=random.randint(0, 64 * 2))
-            if 'city' in response:
+            txt = event.obj.message['text'].lower()
+            if 'время' in txt or 'число' in txt or 'дата' in \
+                    txt or 'день' in txt:
                 vk.messages.send(user_id=event.obj.message['from_id'],
-                                 message=f"Как поживает {event.obj.message['city']}?",
+                                 message=f"Привет, {response['first_name']}!",
                                  random_id=random.randint(0, 64 * 2))
-
+                vk.messages.send(user_id=event.obj.message['from_id'],
+                                 message=f"Дата: {datetime.datetime.now().date()}, время: {datetime.datetime.now().time()}, "
+                                         f"день недели: {datetime.datetime.now().today().weekday()}",
+                                 random_id=random.randint(0, 64 * 2))
+            else:
+                vk.messages.send(user_id=event.obj.message['from_id'],
+                                 message=f"Привет, {response['first_name']}!\n"
+                                         f"Напиши мне слово число, время, дата или день, а я выведу информацию о дне",
+                                 random_id=random.randint(0, 64 * 2))
 
 if __name__ == '__main__':
     main()
